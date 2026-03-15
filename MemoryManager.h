@@ -9,6 +9,7 @@
 #include<list> 
 #include<functional>
 #include<cstdint>
+#include<cstdlib> 
 
 struct Hole{
 
