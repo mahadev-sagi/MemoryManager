@@ -10,11 +10,12 @@
 #include<functional>
 #include<cstdint>
 #include<cstdlib> 
+#include<cmath>
 
 struct Hole{
 
-    unsigned int offset; 
-    unsigned int length;
+    size_t offset; 
+    size_t length;
 };
 
 class MemoryManager{
