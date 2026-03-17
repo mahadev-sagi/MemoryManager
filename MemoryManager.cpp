@@ -26,17 +26,17 @@ void MemoryManager::initialize(size_t sizeInWords) {
         shutdown(); 
     }
     this->sizeInWords = sizeInWords;
-    memoryBlock = new uint8_t[sizeInWords * wordSize];
+    memoryBlock = new uint8_t[sizeInWords * wordSize]; 
     holes.push_back({0,sizeInWords});
 
 
 }
 
 void MemoryManager::shutdown() {
-    delete[] memoryBlock;
+    delete[] memoryBlock; //delete the whole memory block and set to nullptr for edge case testing
     memoryBlock = nullptr;
-    holes.clear();
-    sizeInWords = 0;
+    holes.clear(); // clear out the holes list 
+    sizeInWords = 0; // set the size to 0 for now
 }
 
 
@@ -112,8 +112,76 @@ void MemoryManager::free(void* address) {
         }
 
 }
-   
 
+void MemoryManager::setAllocator(std::function<int(int, void*)> allocator) {
+this->allocator = allocator;
+
+}
+
+int MemoryManager::dumpMemoryMap(char* filename) {
+    if(memoryBlock == nullptr){
+        return -1;  // edgecase check to make sure memoryBlock was initilaized
+    }
+   int fd = open(filename, O_RDWR | O_CREAT | O_TRUNC, 0777); 
+    if(fd == -1){
+     return -1;  // file didn't open
+    }
+    uint16_t* holeList = (uint16_t*)getList();
+    int count = holeList[0];
+    for(int i = 0; i < count; i++){
+        string line = "[" + to_string(holeList[1 + 2 * i]) + ", " 
+        + to_string(holeList[2 + 2 * i]) + "]" ;
+        if( i < count -1){
+            line += " - "; // add separator if not the last hole
+        } 
+        write(fd, line.c_str(), line.length());
+    }
+    close(fd);
+    delete[] holeList;
+    return 0; 
+}
+
+
+void* MemoryManager::getList(){
+    if(memoryBlock == nullptr){
+        return nullptr; // if no memory is allocated return nullptr 
+    }
+    uint16_t* list = new uint16_t[(holes.size() * 2) +1]; // +1 for count
+    list[0] = holes.size(); // order of elements count, offset 1, length 1...
+    int indexCounter = 1; // counter to start index at second position of list 
+    for(auto it  = holes.begin(); it != holes.end(); it++){
+        list[indexCounter] = it->offset;
+        list[indexCounter + 1] = it->length;
+        indexCounter += 2; // increment by 2 to move to the next offset and length pair
+    }
+    return list; 
+
+}
+
+void* MemoryManager::getBitmap(){
+    if(memoryBlock == nullptr){
+        return nullptr; // if no memory is allocated return nullptr 
+    }
+    size_t byteSize = (sizeInWords + 7) / 8; // calculate the number of bytes needed for the bitmap
+    uint8_t* bitmap = new uint8_t[byteSize + 2];
+    for(size_t i = 0; i < sizeInWords; i++){
+        bool hole = false; 
+        for(auto it = holes.begin(); it != holes.end(); it++){
+            if(it->offset && i < it->offset + it->length){
+                hole = true; 
+                break; 
+            }
+        }
+        if(!hole){
+            bitmap[2 + (i / 8)] |= (1 << (i % 8)); // set the bit to 1 if it is allocated
+        }
+    }
+    bitmap[0] = byteSize & 0xFF; //store the lowbyte 
+    bitmap[1] = (byteSize >> 8) & 0xFF; // store the highbyte since it is little endian
+    return bitmap;
+
+
+}
 
 
 unsigned MemoryManager::getWordSize() {
@@ -128,7 +196,53 @@ unsigned MemoryManager::getMemoryLimit() {
 return sizeInWords * wordSize;
 }
 
-void MemoryManager::setAllocator(std::function<int(int, void*)> allocator) {
-this->allocator = allocator;
 
+
+
+int bestFit(int sizeInWords, void* list){
+    if(list == nullptr) {
+        return -1; // edge case to check list isn't null
+    }
+    uint16_t* holeList = (uint16_t*)list;
+    int count = holeList[0]; // first position is count of holes
+    if(count == 0) {
+        return -1;
+    }
+    int bestIndex = -1; 
+    for(int i = 0; i < count; i++){
+        int length = holeList[2 + 2 * i]; // ofset, then length 
+        if(length >= sizeInWords){
+            if(bestIndex == -1 || length < holeList[2 + 2*bestIndex]){
+                bestIndex = i; // update best index if it is the first hole found or if it is smaller than the current best hole
+            }
+        }
+    }   
+    if(bestIndex == -1) { // if no hole big enough is found, return -1
+        return bestIndex;}
+    return holeList[1 + 2*bestIndex]; // return offset
 }
+
+int worstFit(int sizeInWords, void* list){ // should find the hole that is largest
+    if(list == nullptr){
+        return -1; // make sure if not initliaized to return -1
+    }
+    uint16_t* holeList = (uint16_t*)list;
+    int count = holeList[0];
+    if(count == 0){ // no holes available
+        return -1; 
+    }
+    int worstIndex = -1;
+    for(int i = 0; i < count; i++){
+        int length = holeList[2 +2 * i]; 
+        if(length >= sizeInWords){
+            if(worstIndex == -1 || length > holeList[2 + 2*worstIndex]){
+                worstIndex = i; // update worst index if it is the first hole found or if it is larger than the current worst hole
+            }
+        }
+    }
+    if(worstIndex == -1){ // if no hole big enough is found, return -1
+        return worstIndex;
+    }
+    return holeList[1 + 2*worstIndex]; // return offset
+
+} 

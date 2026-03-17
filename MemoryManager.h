@@ -11,6 +11,8 @@
 #include<cstdint>
 #include<cstdlib> 
 #include<cmath>
+#include<fcntl.h>
+#include<unistd.h> 
 
 struct Hole{
 
